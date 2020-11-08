@@ -53,6 +53,7 @@ void setup() {
 }
 
 void unlock(){
+  //unlock animation
   for(int fade=0; fade<MAXVAL; fade++){
     for(int i=0; i<NUMPIXELS; i++){
       pixels.setPixelColor(i, pixels.Color(0,fade,0));
@@ -68,6 +69,26 @@ void unlock(){
       pixels.show();
       delay(FADEVAL);
     }
+    pixels.setPixelColor(i, pixels.Color(0,0,0));
+    pixels.show();
+  }
+
+  //lock animation
+  for(int fade=0; fade<MAXVAL; fade++){
+    for(int i=0; i<NUMPIXELS; i++){
+      pixels.setPixelColor(i, pixels.Color(fade,0,0));
+      pixels.show();
+    }
+    delay(FADEVAL-3);
+  }
+  for(int fade=0; fade<MAXVAL; fade++){
+    for(int i=0; i<NUMPIXELS; i++){
+      pixels.setPixelColor(i, pixels.Color(MAXVAL-fade,0,0));
+      pixels.show();
+    }
+    delay(FADEVAL-3);
+  }
+  for(int i=0; i<NUMPIXELS; i++){
     pixels.setPixelColor(i, pixels.Color(0,0,0));
     pixels.show();
   }
