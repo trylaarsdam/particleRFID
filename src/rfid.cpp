@@ -6,6 +6,7 @@
 #line 1 "d:/Dev/rfid/src/rfid.ino"
 void setup();
 void unlock();
+void ResetInfo();
 void loop();
 #line 1 "d:/Dev/rfid/src/rfid.ino"
 SYSTEM_MODE(MANUAL);
@@ -71,6 +72,16 @@ void unlock(){
     pixels.show();
   }
 }
+byte buffer[18];
+byte Card[16][4];
+
+void ResetInfo(){
+	for (int i=0; i<=15; i++){
+		for (int j=0; j<=4; j++){
+			Card[i][j]=0;
+		}
+	}
+}
 
 // loop() runs over and over again, as quickly as it can execute.
 void loop() {
@@ -108,6 +119,30 @@ void loop() {
   // rising edge
   if (rfid_tag_present && !rfid_tag_present_prev){
     Serial.println("Tag found");
+    for(byte page=0; page <=15; page+=4){
+      byte byteCount = sizeof(buffer);
+      if(mfrc522.MIFARE_Read(page,buffer,&byteCount) == !mfrc522.STATUS_OK){
+        Serial.println("MIFARE_Read() failed");
+        return;
+      }
+      int i_=0;
+      for (int i=page; i<=page+3; i++){
+        for (int j=0; j<=3; j++){
+          Card[i][j]=buffer[4*i_ + j];
+        }
+        i_++;
+      }
+    }
+    mfrc522.PICC_HaltA();
+    Serial.println("--------------------------");
+    for (int i=0; i<16; i++){
+      for (int j=0; j<4; j++){
+        Serial.print(Card[i][j],HEX);
+        Serial.print(" ");
+      }
+      Serial.println();
+    }
+    Serial.println("--------------------------");
     unlock();
   }
   

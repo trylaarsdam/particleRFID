@@ -122,6 +122,16 @@ void loop() {
         i_++;
       }
     }
+    mfrc522.PICC_HaltA();
+    Serial.println("--------------------------");
+    for (int i=0; i<16; i++){
+      for (int j=0; j<4; j++){
+        Serial.print(Card[i][j],HEX);
+        Serial.print(" ");
+      }
+      Serial.println();
+    }
+    Serial.println("--------------------------");
     unlock();
   }
   
