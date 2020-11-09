@@ -6,6 +6,12 @@
 #line 1 "d:/Dev/rfid/src/rfid.ino"
 void setup();
 uint8_t getID();
+void readID( uint8_t number );
+boolean checkTwo ( byte a[], byte b[] );
+boolean findID( byte find[] );
+void writeID( byte a[] );
+void deleteID( byte a[] );
+uint8_t findIDSLOT( byte find[] );
 void unlock();
 void resetInfo();
 void dump_byte_array(byte* buffer, byte bufferSize);
@@ -41,6 +47,7 @@ bool rfid_tag_present_prev = false;
 bool rfid_tag_present = false;
 int _rfid_error_counter = 0;
 bool _tag_found = false;
+boolean match = false;
 uint8_t successRead;
 
 MFRC522::MIFARE_Key key;
@@ -49,6 +56,8 @@ MFRC522::MIFARE_Key newKeyB = {keyByte: {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5}};
 
 byte readCard[4];
 byte masterCard[4];
+byte storedCard[4];   // Stores an ID read from EEPROM
+
 
 // setup() runs once, when the device is first turned on.
 void setup() {
@@ -66,6 +75,7 @@ void setup() {
   if(digitalRead(EEPROMRESET) == HIGH){
     Serial.println("CLEARING EEPROM");
     EEPROM.clear();
+    EEPROM.write(0, 0);
     for(int i=0; i<NUMPIXELS; i = i + 2){
       pixels.setPixelColor(i, pixels.Color(0,0,255));
       pixels.show();
@@ -137,13 +147,103 @@ uint8_t getID() {
   return 1;
 }
 
-void unlock(){
-  
-  do{
-    successRead = getID();
+void readID( uint8_t number ) {
+  uint8_t start = (number * 4 ) + 2;    // Figure out starting position
+  for ( uint8_t i = 0; i < 4; i++ ) {     // Loop 4 times to get the 4 Bytes
+    storedCard[i] = EEPROM.read(start + i);   // Assign values read from EEPROM to array
   }
-  while(!successRead);
-  successRead = false;
+}
+
+boolean checkTwo ( byte a[], byte b[] ) {
+  if ( a[0] != 0 )      // Make sure there is something in the array first
+    match = true;       // Assume they match at first
+  for ( uint8_t k = 0; k < 4; k++ ) {   // Loop 4 times
+    if ( a[k] != b[k] )     // IF a != b then set match = false, one fails, all fail
+      match = false;
+  }
+  if ( match ) {      // Check to see if if match is still true
+    return true;      // Return true
+  }
+  else  {
+    return false;       // Return false
+  }
+}
+
+boolean findID( byte find[] ) {
+  uint8_t count = EEPROM.read(0);     // Read the first Byte of EEPROM that
+  Serial.println(EEPROM.read(0));
+  if(count == 0){
+    return false;
+  }
+  for ( uint8_t i = 1; i <= count; i++ ) {    // Loop once for each EEPROM entry
+    readID(i);          // Read an ID from EEPROM, it is stored in storedCard[4]
+    if ( checkTwo( find, storedCard ) ) {   // Check to see if the storedCard read from EEPROM
+      return true;
+      break;  // Stop looking we found it
+    }
+    else {    // If not, return false
+    }
+  }
+  return false;
+}
+
+void writeID( byte a[] ) {
+  if ( !findID( a ) ) {     // Before we write to the EEPROM, check to see if we have seen this card before!
+    uint8_t num = EEPROM.read(0);     // Get the numer of used spaces, position 0 stores the number of ID cards
+    uint8_t start = ( num * 4 ) + 6;  // Figure out where the next slot starts
+    num++;                // Increment the counter by one
+    EEPROM.write( 0, num );     // Write the new count to the counter
+    for ( uint8_t j = 0; j < 4; j++ ) {   // Loop 4 times
+      EEPROM.write( start + j, a[j] );  // Write the array values to EEPROM in the right position
+    }
+    Serial.println(F("Succesfully added ID record to EEPROM"));
+  }
+  else {
+    Serial.println(F("Failed! There is something wrong with ID or bad EEPROM"));
+  }
+}
+
+void deleteID( byte a[] ) {
+  if ( !findID( a ) ) {     // Before we delete from the EEPROM, check to see if we have this card!
+    Serial.println(F("Failed! There is something wrong with ID or bad EEPROM"));
+  }
+  else {
+    uint8_t num = EEPROM.read(0);   // Get the numer of used spaces, position 0 stores the number of ID cards
+    uint8_t slot;       // Figure out the slot number of the card
+    uint8_t start;      // = ( num * 4 ) + 6; // Figure out where the next slot starts
+    uint8_t looping;    // The number of times the loop repeats
+    uint8_t j;
+    uint8_t count = EEPROM.read(0); // Read the first Byte of EEPROM that stores number of cards
+    slot = findIDSLOT( a );   // Figure out the slot number of the card to delete
+    start = (slot * 4) + 2;
+    looping = ((num - slot) * 4);
+    num--;      // Decrement the counter by one
+    EEPROM.write( 0, num );   // Write the new count to the counter
+    for ( j = 0; j < looping; j++ ) {         // Loop the card shift times
+      EEPROM.write( start + j, EEPROM.read(start + 4 + j));   // Shift the array values to 4 places earlier in the EEPROM
+    }
+    for ( uint8_t k = 0; k < 4; k++ ) {         // Shifting loop
+      EEPROM.write( start + j + k, 0);
+    }
+    Serial.println(F("Succesfully removed ID record from EEPROM"));
+  }
+}
+
+uint8_t findIDSLOT( byte find[] ) {
+  uint8_t count = EEPROM.read(0);       // Read the first Byte of EEPROM that
+  for ( uint8_t i = 1; i <= count; i++ ) {    // Loop once for each EEPROM entry
+    readID(i);                // Read an ID from EEPROM, it is stored in storedCard[4]
+    if ( checkTwo( find, storedCard ) ) {   // Check to see if the storedCard read from EEPROM
+      // is the same as the find[] ID card passed
+      return i;         // The slot number of the card
+      break;          // Stop looking we found it
+    }
+  }
+}
+
+
+void unlock(){
+  Serial.println("Successful card read");
   if(((uint8_t)readCard[0] == (uint8_t)masterCard[0]) && ((uint8_t)readCard[1] == (uint8_t)masterCard[1]) && ((uint8_t)readCard[2] == (uint8_t)masterCard[2]) && ((uint8_t)readCard[3] == (uint8_t)masterCard[3])){
     Serial.println("Master card detected");
     do {
@@ -178,6 +278,7 @@ void unlock(){
         delay(500);
       }
       while(!successRead);
+      deleteID(readCard);
       Serial.println("Card removed");
       for(int i=0; i<NUMPIXELS; i = i + 2){
         pixels.setPixelColor(i, pixels.Color(0,50,0));
@@ -190,6 +291,7 @@ void unlock(){
       }
     }
     else{
+      writeID(readCard);
       Serial.println("Card whitelisted");
       for(int i=0; i<NUMPIXELS; i = i + 2){
         pixels.setPixelColor(i, pixels.Color(0,50,0));
@@ -202,47 +304,75 @@ void unlock(){
       }
     }
   }
+  else{
+    Serial.println("card not master");
+    if(findID(readCard)){
+      Serial.println("Card Known");
+      //unlock animation
+      digitalWrite(D3, HIGH);
+      for(int fade=0; fade<MAXVAL; fade++){
+        for(int i=0; i<NUMPIXELS; i++){
+          pixels.setPixelColor(i, pixels.Color(0,fade,0));
+          pixels.show();
+        }
+        delay(FADEVAL);
+      }
+      
+      delay(DELAYVAL * 7);
+      for(int i=0; i<NUMPIXELS; i++){
+        for(int fade=0; fade<MAXVAL; fade++){
+          pixels.setPixelColor(i, pixels.Color(0,MAXVAL-fade,0));
+          pixels.show();
+          delay(FADEVAL);
+        }
+        pixels.setPixelColor(i, pixels.Color(0,0,0));
+        pixels.show();
+      }
+      digitalWrite(D3, LOW);
+      //lock animation
+      for(int fade=0; fade<MAXVAL; fade++){
+        for(int i=0; i<NUMPIXELS; i++){
+          pixels.setPixelColor(i, pixels.Color(fade,0,0));
+          pixels.show();
+        }
+        delay(FADEVAL-3);
+      }
+      for(int fade=0; fade<MAXVAL; fade++){
+        for(int i=0; i<NUMPIXELS; i++){
+          pixels.setPixelColor(i, pixels.Color(MAXVAL-fade,0,0));
+          pixels.show();
+        }
+        delay(FADEVAL-3);
+      }
+      for(int i=0; i<NUMPIXELS; i++){
+        pixels.setPixelColor(i, pixels.Color(0,0,0));
+        pixels.show();
+      }
+    }
+    else{
+      Serial.println("Card unkown");
+      match = false;
+      successRead = false;
+      for(int fade=0; fade<MAXVAL; fade++){
+        for(int i=0; i<NUMPIXELS; i++){
+          pixels.setPixelColor(i, pixels.Color(fade,0,0));
+          pixels.show();
+        }
+        delay(FADEVAL-3);
+      }
+      for(int i=0; i<NUMPIXELS; i++){
+        for(int fade=0; fade<MAXVAL; fade++){
+          pixels.setPixelColor(i, pixels.Color(MAXVAL-fade,0,0));
+          pixels.show();
+        }
+        delay(FADEVAL-3);
+        pixels.setPixelColor(i, pixels.Color(0,0,0));
+        pixels.show();
+      } 
+    }
+  }
   
-  //unlock animation
-  digitalWrite(D3, HIGH);
-  for(int fade=0; fade<MAXVAL; fade++){
-    for(int i=0; i<NUMPIXELS; i++){
-      pixels.setPixelColor(i, pixels.Color(0,fade,0));
-      pixels.show();
-    }
-    delay(FADEVAL);
-  }
   
-  delay(DELAYVAL * 7);
-  for(int i=0; i<NUMPIXELS; i++){
-    for(int fade=0; fade<MAXVAL; fade++){
-      pixels.setPixelColor(i, pixels.Color(0,MAXVAL-fade,0));
-      pixels.show();
-      delay(FADEVAL);
-    }
-    pixels.setPixelColor(i, pixels.Color(0,0,0));
-    pixels.show();
-  }
-  digitalWrite(D3, LOW);
-  //lock animation
-  for(int fade=0; fade<MAXVAL; fade++){
-    for(int i=0; i<NUMPIXELS; i++){
-      pixels.setPixelColor(i, pixels.Color(fade,0,0));
-      pixels.show();
-    }
-    delay(FADEVAL-3);
-  }
-  for(int fade=0; fade<MAXVAL; fade++){
-    for(int i=0; i<NUMPIXELS; i++){
-      pixels.setPixelColor(i, pixels.Color(MAXVAL-fade,0,0));
-      pixels.show();
-    }
-    delay(FADEVAL-3);
-  }
-  for(int i=0; i<NUMPIXELS; i++){
-    pixels.setPixelColor(i, pixels.Color(0,0,0));
-    pixels.show();
-  }
 }
 byte buffer[18];
 byte Card[16][4];
@@ -269,69 +399,10 @@ void dump_byte_array(byte* buffer, byte bufferSize) {
 
 // loop() runs over and over again, as quickly as it can execute.
 void loop() {
-  // The core of your code will likely live here.
-
-
-  rfid_tag_present_prev = rfid_tag_present;
-
-  _rfid_error_counter += 1;
-  if(_rfid_error_counter > 2){
-    _tag_found = false;
+  do {
+    successRead = getID();
   }
-
-  // Detect Tag without looking for collisions
-  byte bufferATQA[2];
-  byte bufferSize = sizeof(bufferATQA);
-
-  // Reset baud rates
-  mfrc522.PCD_WriteRegister(mfrc522.TxModeReg, 0x00);
-  mfrc522.PCD_WriteRegister(mfrc522.RxModeReg, 0x00);
-  // Reset ModWidthReg
-  mfrc522.PCD_WriteRegister(mfrc522.ModWidthReg, 0x26);
-
-
-  if(mfrc522.PICC_RequestA(bufferATQA, &bufferSize) == mfrc522.STATUS_OK){
-    if ( ! mfrc522.PICC_ReadCardSerial()) { //Since a PICC placed get Serial and continue   
-      return;
-    }
-    _rfid_error_counter = 0;
-    _tag_found = true;        
-  }
-  
-  rfid_tag_present = _tag_found;
-  
-  // rising edge
-  if (rfid_tag_present && !rfid_tag_present_prev){
-    Serial.println("Tag found");
-    for(byte page=0; page <=15; page+=4){
-      byte byteCount = sizeof(buffer);
-      if(mfrc522.MIFARE_Read(page,buffer,&byteCount) == !mfrc522.STATUS_OK){
-        Serial.println("MIFARE_Read() failed");
-        return;
-      }
-      int i_=0;
-      for (int i=page; i<=page+3; i++){
-        for (int j=0; j<=3; j++){
-          Card[i][j]=buffer[4*i_ + j];
-        }
-        i_++;
-      }
-    }
-    mfrc522.PICC_HaltA();
-    Serial.println("--------------------------");
-    for (int i=0; i<16; i++){
-      for (int j=0; j<4; j++){
-        Serial.print(Card[i][j],HEX);
-        Serial.print(" ");
-      }
-      Serial.println();
-    }
-    Serial.println("--------------------------");
-    unlock();
-  }
-  
-  // falling edge
-  if (!rfid_tag_present && rfid_tag_present_prev){
-    Serial.println("Tag gone");
-  }
+  while(!successRead);
+  successRead = false;
+  unlock();
 }
