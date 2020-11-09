@@ -5,6 +5,7 @@
 #include "Particle.h"
 #line 1 "d:/Dev/rfid/src/rfid.ino"
 void setup();
+uint8_t getID();
 void unlock();
 void resetInfo();
 void dump_byte_array(byte* buffer, byte bufferSize);
@@ -21,7 +22,9 @@ SYSTEM_MODE(MANUAL);
  * Date: 11/7/2020
  */
 
+#define EEPROMRESET D2
 #define LED_PIN D6
+#define PROGRAMINPUT D7
 #define NUMPIXELS 12
 #define DELAYVAL 250
 #define FADEVAL 5
@@ -38,23 +41,168 @@ bool rfid_tag_present_prev = false;
 bool rfid_tag_present = false;
 int _rfid_error_counter = 0;
 bool _tag_found = false;
+uint8_t successRead;
+
+MFRC522::MIFARE_Key key;
+MFRC522::MIFARE_Key newKeyA = {keyByte: {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}};
+MFRC522::MIFARE_Key newKeyB = {keyByte: {0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5}};
+
+byte readCard[4];
+byte masterCard[4];
 
 // setup() runs once, when the device is first turned on.
 void setup() {
   // Put initialization like pinMode and begin functions here.
   pinMode(D3, OUTPUT);
+  pinMode(EEPROMRESET, INPUT);
+
+
   Serial.begin(9600);
   while(!Serial);
   SPI.begin();
   mfrc522.PCD_Init();
   pixels.begin();
+  delay(1000);
+  if(digitalRead(EEPROMRESET) == HIGH){
+    Serial.println("CLEARING EEPROM");
+    EEPROM.clear();
+    for(int i=0; i<NUMPIXELS; i = i + 2){
+      pixels.setPixelColor(i, pixels.Color(0,0,255));
+      pixels.show();
+      delay(100);
+    }
+    delay(500);
+  }
+
+  if(EEPROM.read(1) != 143) {
+    Serial.println("No master card defined");
+    Serial.println(EEPROM.read(1));
+    Serial.println("Scan card to define as master card.");
+    do {
+      successRead = getID();
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,50,50));
+        pixels.show();
+      }
+      delay(500);
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,0,50));
+        pixels.show();
+      }
+      delay(500);
+    }
+    while(!successRead);
+    successRead = false;
+    for(uint8_t j=0; j<4; j++){
+      EEPROM.write(2+j, readCard[j]);
+    }
+    for(uint8_t i=0; i<4; i++){
+      masterCard[i] = EEPROM.read(2+i);
+    }
+    EEPROM.write(1,(uint8_t)143);
+    Serial.println("Master Card Defined");
+    for(int i=0; i<NUMPIXELS; i = i + 2){
+      pixels.setPixelColor(i, pixels.Color(0,50,0));
+      pixels.show();
+    }
+    delay(500);
+  }
+  for(uint8_t i=0; i<4; i++){
+    masterCard[i] = EEPROM.read(2+i);
+  }
+  Serial.print("Master card stored: ");
+  for(uint8_t i=0; i<4; i++){
+    Serial.println(masterCard[i]);
+  }
+  Serial.println();
   for(int i=0; i<NUMPIXELS; i++){
     pixels.setPixelColor(i, pixels.Color(0,0,0));
     pixels.show();    
   }
 }
 
+uint8_t getID() {
+  if(!mfrc522.PICC_IsNewCardPresent()){
+    return 0;
+  }
+  if(!mfrc522.PICC_ReadCardSerial()){
+    return 0;
+  }
+  for ( uint8_t i = 0; i < 4; i++) {  //
+    readCard[i] = mfrc522.uid.uidByte[i];
+    Serial.print(readCard[i], HEX);
+  }
+  Serial.println("");
+  mfrc522.PICC_HaltA(); // Stop reading
+  return 1;
+}
+
 void unlock(){
+  
+  do{
+    successRead = getID();
+  }
+  while(!successRead);
+  successRead = false;
+  if(((uint8_t)readCard[0] == (uint8_t)masterCard[0]) && ((uint8_t)readCard[1] == (uint8_t)masterCard[1]) && ((uint8_t)readCard[2] == (uint8_t)masterCard[2]) && ((uint8_t)readCard[3] == (uint8_t)masterCard[3])){
+    Serial.println("Master card detected");
+    do {
+      successRead = getID();
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,50,50));
+        pixels.show();
+      }
+      delay(500);
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,50,0));
+        pixels.show();
+      }
+      delay(500);
+    }
+    while(!successRead);
+    successRead = false;
+    if(((uint8_t)readCard[0] == (uint8_t)masterCard[0]) && ((uint8_t)readCard[1] == (uint8_t)masterCard[1]) && ((uint8_t)readCard[2] == (uint8_t)masterCard[2]) && ((uint8_t)readCard[3] == (uint8_t)masterCard[3])){
+      Serial.println("Master card detected again");
+      Serial.println("Next card scanned will be blacklisted");
+      do {
+        successRead = getID();
+        for(int i=0; i<NUMPIXELS; i = i + 2){
+          pixels.setPixelColor(i, pixels.Color(0,50,50));
+          pixels.show();
+        }
+        delay(500);
+        for(int i=0; i<NUMPIXELS; i = i + 2){
+          pixels.setPixelColor(i, pixels.Color(50,0,0));
+          pixels.show();
+        }
+        delay(500);
+      }
+      while(!successRead);
+      Serial.println("Card removed");
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,50,0));
+        pixels.show();
+      }
+      delay(500);
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,0,0));
+        pixels.show();
+      }
+    }
+    else{
+      Serial.println("Card whitelisted");
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,50,0));
+        pixels.show();
+      }
+      delay(500);
+      for(int i=0; i<NUMPIXELS; i = i + 2){
+        pixels.setPixelColor(i, pixels.Color(0,0,0));
+        pixels.show();
+      }
+    }
+  }
+  
   //unlock animation
   digitalWrite(D3, HIGH);
   for(int fade=0; fade<MAXVAL; fade++){
@@ -117,84 +265,7 @@ void dump_byte_array(byte* buffer, byte bufferSize) {
   }
 }
 
-bool MIFARE_SetKeys(MFRC522::MIFARE_Key* oldKeyA, MFRC522::MIFARE_Key* oldKeyB,
-                    MFRC522::MIFARE_Key* newKeyA, MFRC522::MIFARE_Key* newKeyB,
-                    int sector) {
-  MFRC522::StatusCode status;
-  byte trailerBlock = sector * 4 + 3;
-  byte buffer[18];
-  byte size = sizeof(buffer);
 
-  // Authenticate using key A
-  Serial.println(F("Authenticating using key A..."));
-  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, oldKeyA, &(mfrc522.uid));
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("PCD_Authenticate() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
-  }
-
-  // Show the whole sector as it currently is
-  Serial.println(F("Current data in sector:"));
-  mfrc522.PICC_DumpMifareClassicSectorToSerial(&(mfrc522.uid), oldKeyA, sector);
-  Serial.println();
-
-  // Read data from the block
-  Serial.print(F("Reading data from block ")); Serial.print(trailerBlock);
-  Serial.println(F(" ..."));
-  status = (MFRC522::StatusCode) mfrc522.MIFARE_Read(trailerBlock, buffer, &size);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("MIFARE_Read() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
-  }
-  Serial.print(F("Data in block ")); Serial.print(trailerBlock); Serial.println(F(":"));
-  dump_byte_array(buffer, 16); Serial.println();
-  Serial.println();
-
-  // Authenticate using key B
-  Serial.println(F("Authenticating again using key B..."));
-  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, trailerBlock, oldKeyB, &(mfrc522.uid));
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("PCD_Authenticate() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
-  }
-
-  if (newKeyA != nullptr || newKeyB != nullptr) {
-    for (byte i = 0; i < MFRC522::MF_KEY_SIZE; i++) {
-      if (newKeyA != nullptr) {
-        buffer[i] = newKeyA->keyByte[i];
-      }
-      if (newKeyB != nullptr) {
-        buffer[i+10] = newKeyB->keyByte[i];
-      }
-    }
-  }
-
-  // Write data to the block
-  Serial.print(F("Writing data into block ")); Serial.print(trailerBlock);
-  Serial.println(F(" ..."));
-  status = (MFRC522::StatusCode) mfrc522.MIFARE_Write(trailerBlock, buffer, 16);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("MIFARE_Write() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-    return false;
-  }
-  Serial.println();
-
-  // Read data from the block (again, should now be what we have written)
-  Serial.print(F("Reading data from block ")); Serial.print(trailerBlock);
-  Serial.println(F(" ..."));
-  status = (MFRC522::StatusCode)mfrc522.MIFARE_Read(trailerBlock, buffer, &size);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("MIFARE_Read() failed: "));
-    Serial.println(mfrc522.GetStatusCodeName(status));
-  }
-  Serial.print(F("Data in block ")); Serial.print(trailerBlock); Serial.println(F(":"));
-  dump_byte_array(buffer, 16); Serial.println();
-  return true;
-}
 
 // loop() runs over and over again, as quickly as it can execute.
 void loop() {
