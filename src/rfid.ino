@@ -30,6 +30,7 @@ bool _tag_found = false;
 // setup() runs once, when the device is first turned on.
 void setup() {
   // Put initialization like pinMode and begin functions here.
+  pinMode(D3, OUTPUT);
   Serial.begin(9600);
   while(!Serial);
   SPI.begin();
@@ -43,6 +44,7 @@ void setup() {
 
 void unlock(){
   //unlock animation
+  digitalWrite(D3, HIGH);
   for(int fade=0; fade<MAXVAL; fade++){
     for(int i=0; i<NUMPIXELS; i++){
       pixels.setPixelColor(i, pixels.Color(0,fade,0));
@@ -61,7 +63,7 @@ void unlock(){
     pixels.setPixelColor(i, pixels.Color(0,0,0));
     pixels.show();
   }
-
+  digitalWrite(D3, LOW);
   //lock animation
   for(int fade=0; fade<MAXVAL; fade++){
     for(int i=0; i<NUMPIXELS; i++){
@@ -85,12 +87,101 @@ void unlock(){
 byte buffer[18];
 byte Card[16][4];
 
-void ResetInfo(){
+void resetInfo(){
 	for (int i=0; i<=15; i++){
 		for (int j=0; j<=4; j++){
 			Card[i][j]=0;
 		}
 	}
+}
+
+/**
+   Helper routine to dump a byte array as hex values to Serial.
+*/
+void dump_byte_array(byte* buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], HEX);
+  }
+}
+
+bool MIFARE_SetKeys(MFRC522::MIFARE_Key* oldKeyA, MFRC522::MIFARE_Key* oldKeyB,
+                    MFRC522::MIFARE_Key* newKeyA, MFRC522::MIFARE_Key* newKeyB,
+                    int sector) {
+  MFRC522::StatusCode status;
+  byte trailerBlock = sector * 4 + 3;
+  byte buffer[18];
+  byte size = sizeof(buffer);
+
+  // Authenticate using key A
+  Serial.println(F("Authenticating using key A..."));
+  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, oldKeyA, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("PCD_Authenticate() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return false;
+  }
+
+  // Show the whole sector as it currently is
+  Serial.println(F("Current data in sector:"));
+  mfrc522.PICC_DumpMifareClassicSectorToSerial(&(mfrc522.uid), oldKeyA, sector);
+  Serial.println();
+
+  // Read data from the block
+  Serial.print(F("Reading data from block ")); Serial.print(trailerBlock);
+  Serial.println(F(" ..."));
+  status = (MFRC522::StatusCode) mfrc522.MIFARE_Read(trailerBlock, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("MIFARE_Read() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return false;
+  }
+  Serial.print(F("Data in block ")); Serial.print(trailerBlock); Serial.println(F(":"));
+  dump_byte_array(buffer, 16); Serial.println();
+  Serial.println();
+
+  // Authenticate using key B
+  Serial.println(F("Authenticating again using key B..."));
+  status = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, trailerBlock, oldKeyB, &(mfrc522.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("PCD_Authenticate() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return false;
+  }
+
+  if (newKeyA != nullptr || newKeyB != nullptr) {
+    for (byte i = 0; i < MFRC522::MF_KEY_SIZE; i++) {
+      if (newKeyA != nullptr) {
+        buffer[i] = newKeyA->keyByte[i];
+      }
+      if (newKeyB != nullptr) {
+        buffer[i+10] = newKeyB->keyByte[i];
+      }
+    }
+  }
+
+  // Write data to the block
+  Serial.print(F("Writing data into block ")); Serial.print(trailerBlock);
+  Serial.println(F(" ..."));
+  status = (MFRC522::StatusCode) mfrc522.MIFARE_Write(trailerBlock, buffer, 16);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("MIFARE_Write() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+    return false;
+  }
+  Serial.println();
+
+  // Read data from the block (again, should now be what we have written)
+  Serial.print(F("Reading data from block ")); Serial.print(trailerBlock);
+  Serial.println(F(" ..."));
+  status = (MFRC522::StatusCode)mfrc522.MIFARE_Read(trailerBlock, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("MIFARE_Read() failed: "));
+    Serial.println(mfrc522.GetStatusCodeName(status));
+  }
+  Serial.print(F("Data in block ")); Serial.print(trailerBlock); Serial.println(F(":"));
+  dump_byte_array(buffer, 16); Serial.println();
+  return true;
 }
 
 // loop() runs over and over again, as quickly as it can execute.
